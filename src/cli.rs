@@ -1,13 +1,11 @@
-use std::{io::{self, Write}, thread};
+use std::{io::{self, Write}, sync::{Arc, Mutex}};
 
-use crate::node::Node;
+use crate::node::KVStore;
 
 
 
-pub fn run_cli() {
-    let node = Node::new();
+pub fn run_cli(store: Arc<Mutex<KVStore>>) {
 
-    println!();
     println!("🔑 DistKV CLI - Distributed Key-Value Store");
     println!("Type 'help' to see available commands.");
     println!();
@@ -22,63 +20,67 @@ pub fn run_cli() {
             continue;
         }
 
-        let parts: Vec<String> = input.trim().split_whitespace().map(|s| s.to_string()).collect();
-
-        if parts.is_empty() {
+        let input = input.trim();
+        if input.is_empty() {
             continue;
         }
 
-        let command  = parts[0].to_lowercase();
+        let parts: Vec<&str> = input.splitn(3, ' ').collect();
+        let command  = parts[0].to_uppercase();
 
         match command.as_str() {
-            "set" if parts.len() == 3 => {
-                let key = parts[1].clone();
-                let value = parts[2].clone();
-                let node_clone = node.clone();
-
-                //spawn a thread for each command 
-                thread::spawn(move || {
-                    node_clone.set(key, value);
-                    println!("✅ Key set successfully.");
-                }).join().unwrap();
+            "SET" => {
+                if parts.len() < 3 {
+                    println!("⚠️ Usage: SET <key> <value>");
+                    continue;
+                }
+                let key = parts[1];
+                let value = parts[2];
+                let mut store = store.lock().unwrap();
+                store.set(key.to_string(), value.to_string());
+                println!("✅ Set key '{}' = '{}'", key, value);
             }
-
-            "get" if parts.len() == 2 => {
-                let key = parts[1].clone();
-                let node_clone = node.clone();
-
-                thread::spawn(move || {
-                    match node_clone.get(key){
-                        Some(val) => println!("📦 Value: {}", val),
-                        None => println!("Npo key was found"),
-                    }
-                }).join().unwrap();
+            "GET" => {
+                if parts.len() != 2 {
+                    println!("⚠️ Usage: GET <key>");
+                    continue;
+                }
+                let key = parts[1];
+                let store = store.lock().unwrap();
+                match store.get(key) {
+                    Some(value) => println!("🔍 '{}' = '{}'", key, value),
+                    None => println!("❌ Key '{}' not found", key),
+                }
             }
-            "delete" if parts.len() == 2 => {
-                let key = parts[1].clone();
-                let node_clone = node.clone();
-
-                thread::spawn(move || {
-                    if node_clone.delete(key){
-                        println!("🗑️  Key deleted.");
-                    }else {
-                        println!("Key not found");
-                    }
-                }).join().unwrap();
+            "DELETE" => {
+                if parts.len() != 2 {
+                    println!("⚠️ Usage: DELETE <key>");
+                    continue;
+                }
+                let key = parts[1];
+                let mut store = store.lock().unwrap();
+                if store.delete(key) {
+                    println!("🗑️ Deleted key '{}'", key);
+                } else {
+                    println!("❌ Key '{}' not found", key);
+                }
             }
-            "help" => {
-                println!("Available commands:");
-                println!("  set <key> <value>   - Set a key");
-                println!("  get <key>           - Get a key");
-                println!("  delete <key>        - Delete a key");
-                println!("  exit                - Exit CLI");
+            "HELP" => {
+                println!(
+                    "\nAvailable Commands:
+  SET <key> <value>    - Set a key-value pair
+  GET <key>            - Retrieve the value of a key
+  DELETE <key>         - Remove a key
+  HELP                 - Show this message
+  EXIT                 - Quit the CLI\n"
+                );
             }
-            "exit" => {
-                println!("👋 Exiting DistKV");
+            "EXIT" => {
+                println!("👋 Exiting DistKV CLI.");
                 break;
             }
-            _=> {
-                println!("❓ Unknown command or wrong arguments. Try 'help'.")
+            _ => {
+                println!("❓ Unknown command '{}'. Type 'HELP' for help.", command);
             }
         }
     }
